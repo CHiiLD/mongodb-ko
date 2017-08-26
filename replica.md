@@ -21,14 +21,14 @@ Master 역시 slave와의 동기화를 위해 한 개의 쓰레드를 만들어 
 
 ![그림 2-2](./images/pic2-2.png)
 
-[그림 2-2]의 MongoDB는 한 개의 master와 두 개의 slave로 구성된 복제 집합replica set을[1]구성하고 있다. MongoDB는 복제 집합으로 구성된 각각의 노드는 자신을 제외한 다른 노드들이 죽었는지 살았는지를 검사하기 위해 [그림 2-2]과 같은 __heartbeat__ 를 사용한다. MongoDB의 heartbeat는 2초 단위로 수행되며, heartbeat을 받은 서버는 자신의 상태 코드를 heartbeat을 요청한 서버에 보내준다. [표 2]는 heartbeat을 통해 전달된 서버 상태 코드를 보여준다.
+[그림 2-2]의 MongoDB는 한 개의 master와 두 개의 slave로 구성된 복제 집합replica set을 구성하고 있다. MongoDB는 복제 집합으로 구성된 각각의 노드는 자신을 제외한 다른 노드들이 죽었는지 살았는지를 검사하기 위해 [그림 2-2]과 같은 __heartbeat__ 를 사용한다. MongoDB의 heartbeat는 2초 단위로 수행되며, heartbeat을 받은 서버는 자신의 상태 코드를 heartbeat을 요청한 서버에 보내준다. [표 2]는 heartbeat을 통해 전달된 서버 상태 코드를 보여준다.
 
 |상태 코드|	내용|
 |-------|---|
 |RS_STARTUP|	서버가 시작 중이거나 또는 복제 집합의 초기화를 수행하는 상태|
-|RS_STARTUP2|	초기화를 위한 복제 환경 로드는 완료하였지만, primary[2]를   선출하는 상태|
+|RS_STARTUP2|	초기화를 위한 복제 환경 로드는 완료하였지만, primary를   선출하는 상태|
 |RS_PRIMARY|	서버 자신이 primary 상태|
-|RS_SECONDARY|	서버 자신이 secondary[3] 상태|
+|RS_SECONDARY|	서버 자신이 secondary 상태|
 |RS_RECOVERING|	서버가 secondary로 상태가 변경되기 전에 primary로부터 복제 동기화를 수행하는 상태
 |RS_ROLLBACK|	서버가 secondary로 상태가 변경되기 전에 primary로부터 복제 동기화를 수행하는 상태로,  서버가 primary보다 더 많은 데이터를 가지고 있어서 primary 상태로 저장된 데이터로 되돌리는 상태|
 |RS_FATAL|	서버가 복제 집합 안에서 네트워크 단절과 같이 완전한 offline 상태는 아니지만, 심각한 문제가 발생한 상태|
