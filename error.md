@@ -160,3 +160,244 @@ SECONDARY>
 위에서 살펴본 mongos가 존재하기 때문에, MongoDB 사용자는 장애에 대한 예외 처리가 상당히 수월해 졌으며, 임의의 복제 집합 안의 마스터가 사라지지 않는 이상 장애에 대한 관리자 처리가 서비스 중단 없이 이루어 질 수 있다.
 
 ### 단일 샤드 서버 구성
+샤드 서버에서의 장애 처리를 위해 우선 3개 서버로 구성된 한 개의 복제 집합이 한 개의 샤드로 구성된 샤드 서버 구조로 설치한다. Config 서버 3대, mongod 서버 3대, 그리고 mongos 서버 1대로 구성된 총 7개의 프로세스로 [그림 5-9]와 같이 구성한다.
+
+![그림 5-9](./images/pic5-9.png "그림 5-9")
+
+#### 복제 집합(replica set) 설치
+[그림 5-9]과 같은 시스템을 구축하기 위해서 복제 독립 서버 구조로 다음과 같이 설정한다.
+```
+./mongod --dbpath /data/example/firstset1 --port 10001 --replSet firstset
+./mongod --dbpath /data/example/firstset2 --port 10002 --replSet firstset
+./mongod --dbpath /data/example/firstset3 --port 10003 --replSet firstset
+```
+3대의 mongod가 기동되었다면, 포트 10001 서버를 마스터로 만들기 위해 다음과 같은 수순으로 설정한다.
+```
+./mongo localhost:10001/admin
+```
+```
+> db.runCommand({"replSetInitiate" : {"_id" : "firstset", "members" : [{"_id" : 1, "host" : "localhost:10001"}, {"_id" : 2, "host" : "localhost:10002"}, {"_id" : 3, "host" : "localhost:10003"}]}})
+{
+ "info" : "Config now saved locally. Should come online in about a minute.",
+ "ok" : 1
+}
+```
+#### Config 집합 설치
+
+샤드 서버를 구성하기 위해서는 총 3대의 config 서버가 동작되어야 한다. Config 서버 역시 데이터 파일을 생성하기 때문에 dbpath가 설정되어야 한다. 따라서, 3대의 config 서버가 사용할 폴더 경로를 다음과 같이 설정한다.
+```
+/data/example/config1
+/data/example/config2
+/data/example/config3
+```
+```
+./mongod –configsvr --dbpath /data/example/config1 --port 20001
+./mongod –configsvr --dbpath /data/example/config2 --port 20002
+./mongod –configsvr --dbpath /data/example/config3 --port 20003
+```
+
+#### 라우터 설치 그리고 Config 서버와 연결하기
+Config 서버 설치가 모두 완료되었다면, 다음과 같이 mongos를 기동시킨다. Mongos는 mongod와 config 서버와는 달리 dbpath를 가지지 않는다. 즉, 모든 정보는 메모리에 보관하고 있기 때문에 로컬 폴더 경로를 설정하지 않는다. Mongos의 기능 중 하나가 샤딩 정책을 수행하는 것으로 샤딩을 위한 청크(chunk) 크기를 설정하는 `chunkSize` 옵션을 사용한다. 본 보고서에서는 테스트를 위해 1이라는 값을 사용한다. 1은 1MByte를 의미하는 것으로, 1Mbytes의 데이터의 크기에 도달하면 샤딩을 수행한다는 의미이다. 디폴트 크기는 64Mbytes이다.
+
+```
+./mongos --configdb localhost:20001,localhost:20002,localhost:20003 --port 27017 --chunkSize 1
+```
+
+#### 라우터 접속하기
+[그림 5-9]를 보면 클라이언트가 mongos로 연결된다. 복제 독립 서버에서는 클라이언트가 mongod에 바로 접속하였지만, 샤드 서버 구조에서는 클라이언트는 mongos에 접속한다. 이점을 주의하자. Mongos의 접속 방법은 다음과 같다.
+```
+./mongo localhost:27017/admin
+```
+앞에서 mongos를 포트 27017로 설정하였으므로, mongo 클라이언트를 포트 27017로 접속한다. 접속을 완료하면, mongos는 config 서버와 연결된 상태로, 아직 데이터 저장 서버인 샤드와의 접속은 없는 상태이다.
+
+#### 라우더 - 샤드 연결
+Mongos와의 연결을 완료하였다면, 샤드를 등록한다. 샤드는 3개로 구성된 복제 독립 서버를 등록한다. 등록하는 방법은 다음과 같다.
+```
+mongos> db.runCommand( { addshard : "firstset/localhost:10001,localhost:10002,localhost:10003" } )
+{ "shardAdded" : "firstset", "ok" : 1 }
+mongos>
+```
+
+#### 데이터 삽입 테스트
+샤드가 정확하게 설치 되었는지 확인하기 위해 다음과 같이 수행한다.
+```
+mongos > use test
+switched to db test
+mongos > people = ["Marc", "Bill", "George", "Eliot", "Matt", "Trey", "Tracy", "Greg", "Steve", "Kristina", "Katie", "Jeff"];
+mongos > for(var i=0; i<1000000; i++){
+     name = people[Math.floor(Math.random()*people.length)];
+     user_id = i;
+     boolean = [true, false][Math.floor(Math.random()*2)];
+     added_at = new Date();
+     number = Math.floor(Math.random()*10001);
+     db.test_collection.save({"name":name, "user_id":user_id, "boolean": boolean, "added_at":added_at, "number":number });
+}
+```
+
+상기와 같이 데이터를 삽입하고 난 다음에 `db.stats()`를 수행하면 연결 데이터베이스의 상태를 다음과 같이 보여준다.
+
+
+[리스트 5-2] 샤드 서버 구성 및 데이터 삽입 이후 DB 상태
+```
+mongos> db.stats()
+{
+    "raw" : {
+        "firstset/localhost:10001,localhost:10002,localhost:10003" : {
+            "db" : "test",
+            "collections" : 3,
+            "objects" : 1000004,
+            "avgObjSize" : 100.33422666309335,
+            "dataSize" : 100334628,
+            "storageSize" : 141258752,
+            "numExtents" : 15,
+            "indexes" : 1,
+            "indexSize" : 32458720,
+            "fileSize" : 469762048,
+            "nsSizeMB" : 16,
+            "ok" : 1
+        }
+    },
+    "objects" : 1000004,
+    "avgObjSize" : 100.33422666309335,
+    "dataSize" : 100334628,
+    "storageSize" : 141258752,
+    "numExtents" : 15,
+    "indexes" : 1,
+    "indexSize" : 32458720,
+    "fileSize" : 469762048,
+    "ok" : 1
+}
+mongos>
+```
+
+### Config 서버 장애
+[그림 5-9]에서 config 서버가 장애가 발생한 후 데이터 삽입이 발생하였을 경우를 살펴보자. MongoDB의 `config 서버는 데이터 삽입에 영향을 주지 않고, 샤딩 정책을 위한 메타 데이터를 저장하고 있기 때문에 샤딩에 영향을 준다.` 따라서, `config 서버가 죽더라도 데이터 삽입에 영향을 주어서는 안된다.` [리스트 5-3]은 포트 20001 config 서버를 강제로 종료하여 config 서버를 read-only로 만든 후에 데이터를 삽입한 결과를 보여준다.
+
+데이터 삽입은 다음과 같다.
+```
+mongos> for(var i=0; i<1000000; i++){
+     name = people[Math.floor(Math.random()*people.length)];
+     user_id = i;
+     boolean = [true, false][Math.floor(Math.random()*2)];
+     added_at = new Date();
+     number = Math.floor(Math.random()*10001);
+     db.test_collection.save({"name":name, "user_id":user_id, "boolean": boolean,
+                   "added_at":added_at, "number":number });
+}
+```
+
+[리스트 5-3] 포트 20001 config 서버 장애 이후 데이터 삽입
+```
+mongos> db.stats()
+{
+    "raw" : {
+        "firstset/localhost:10001,localhost:10002,localhost:10003" : {
+            "db" : "test",
+            "collections" : 3,
+            "objects" : 2000004,
+            "avgObjSize" : 100.33407533184933,
+            "dataSize" : 200668552,
+            "storageSize" : 272633856,
+            "numExtents" : 18,
+            "indexes" : 1,
+            "indexSize" : 64909264,
+            "fileSize" : 1006632960,
+            "nsSizeMB" : 16,
+            "ok" : 1
+        }
+    },
+    "objects" : 2000004,
+    "avgObjSize" : 100.33407533184933,
+    "dataSize" : 200668552,
+    "storageSize" : 272633856,
+    "numExtents" : 18,
+    "indexes" : 1,
+    "indexSize" : 64909264,
+    "fileSize" : 1006632960,
+    "ok" : 1
+}
+mongos>
+```
+
+[리스트 5-3]에서 데이터 백만건을 다시 입력한 것이라, [리스트 5-2]보다 정확하게 백만건이 더 삽입되어 있다. 두 번째 config 서버 장애 상황을 고려해 보자. 전자의 경우는 config 서버가 장애가 발생하고 난 다음에 백만건의 데이터를 삽입한 경우이고, 이번에 테스트할 사항은 백만건을 삽입하는 도중에 config 서버가 장애가 발생하는 경우이다.
+
+테스트를 위해 앞에서 강제 종료한 포트 20001 config 서버를 다시 재기동한다.
+```
+./mongod –configsvr --dbpath /data/example/config1 --port 20001
+```
+
+데이터를 백만건 삽입을 수행한 후에 포트 20001 config 서버를 강제 종료시킨다. 이와 같을 경우, config 서버가 데이터 삽입에 영향을 주지 않기 때문에 [리스트 5-4]와 같이 정확하게 3백만건이 삽입되어 있는 것을 볼 수 있다.
+
+[리스트 5-4] 데이터 삽입 도중 config 서버 장애 발생
+```
+mongos> db.stats()
+{
+    "raw" : {
+        "firstset/localhost:10001,localhost:10002,localhost:10003" : {
+            "db" : "test",
+            "collections" : 3,
+            "objects" : 3000004,
+            "avgObjSize" : 100.3336955550726,
+            "dataSize" : 301001488,
+            "storageSize" : 409849856,
+            "numExtents" : 20,
+            "indexes" : 1,
+            "indexSize" : 97343456,
+            "fileSize" : 2080374784,
+            "nsSizeMB" : 16,
+            "ok" : 1
+        }
+    },
+    "objects" : 3000004,
+    "avgObjSize" : 100.3336955550726,
+    "dataSize" : 301001488,
+    "storageSize" : 409849856,
+    "numExtents" : 20,
+    "indexes" : 1,
+    "indexSize" : 97343456,
+    "fileSize" : 2080374784,
+    "ok" : 1
+}
+mongos>
+```
+
+
+마지막 세 번째 경우로 config 서버 3대를 모두 장애를 발생시킨 후 데이터 삽입을 수행한 경우를 살펴보자. 이를 위해 포트 20001, 20002, 20003 config 서버 3대를 Ctrl+C 키를 입력하여 강제 종료시킨다. 그러면 mongos는 한 개의 config 서버와도 연결되어 있지 않게 된다. 이 상태에서 동일한 백만건 데이터를 삽입하는 스크립트를 기동하고 난 다음에 DB 상태를 살펴본 결과는 [리스트 5-5]와 같다.
+
+[리스트 5-5] config 서버 집합 3대 모두 장애 발생 후 데이터 삽입
+```
+mongos> db.stats()
+{
+    "raw" : {
+        "firstset/localhost:10001,localhost:10002,localhost:10003" : {
+            "db" : "test",
+            "collections" : 3,
+            "objects" : 4000004,
+            "avgObjSize" : 100.33407666592333,
+            "dataSize" : 401336708,
+            "storageSize" : 499666944,
+            "numExtents" : 21,
+            "indexes" : 1,
+            "indexSize" : 129794000,
+            "fileSize" : 2080374784,
+            "nsSizeMB" : 16,
+            "ok" : 1
+        }
+    },
+    "objects" : 4000004,
+    "avgObjSize" : 100.33407666592333,
+    "dataSize" : 401336708,
+    "storageSize" : 499666944,
+    "numExtents" : 21,
+    "indexes" : 1,
+    "indexSize" : 129794000,
+    "fileSize" : 2080374784,
+    "ok" : 1
+}
+mongos>
+```
+
+[리스트 5-5]를 살펴보면 정확하게 백만건 데이터가 삽입된 것을 볼 수 있다. 따라서, 앞에서 살펴본 config 서버는 데이터 삽입에 영향을 주지 않는 것을 알 수 있다.
+Config 서버는 다시 기동시키면 mongos와 연결되어 복원된다. 3개의 config 서버가 모두 종료된 후에 다음과 같이 3개의 config 서버를 모두 재기동시킨다. 재기동된 서버는 mongos가 살아 있는 이상 config 서버가 자신의 상태 정보를 저장한 로컬에서 읽어 들여 상태를 복원한다. 그리고, mongos는 주기적으로 config 서버의 상태를 체크하기 때문에 복원된 서버와의 접속을 수행해 상태를 정상적인 상태로 유지시키게 된다.
+
+### 마스터 서버 장애
