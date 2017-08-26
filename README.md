@@ -3,11 +3,12 @@
 
 ## 메인
 + [기본](./basic.md)
-+ [사본](./replica-theory.md)
-+ [락](./replica-theory.md)
-+ 샤딩(not yet)
++ [사본](./replica.md)
++ [락](./lock.md)
++ [샤딩](./shading.md)
 
 ## 서브
++ [리서치 요약](./simple-research.md)
 + [메모리 아키텍처](./memory-architecture.md)
 + [클라이언트 통신](./client-with-mongod.md)
 

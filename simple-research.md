@@ -34,4 +34,4 @@
 - 그리고 결코 __싸지 않다.__ (3 Copy)
 
 ***
-[출처](http://bcho.tistory.com/604)
+출처: [조대엽의 블로그](http://bcho.tistory.com/604)
