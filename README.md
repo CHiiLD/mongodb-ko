@@ -6,6 +6,7 @@
 + [사본](./replica.md)
 + [락](./lock.md)
 + [샤딩](./sharding.md)
++ [장애](./error.md)
 
 ## 서브
 + [리서치 요약](./simple-research.md)

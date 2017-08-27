@@ -401,3 +401,132 @@ mongos>
 Config 서버는 다시 기동시키면 mongos와 연결되어 복원된다. 3개의 config 서버가 모두 종료된 후에 다음과 같이 3개의 config 서버를 모두 재기동시킨다. 재기동된 서버는 mongos가 살아 있는 이상 config 서버가 자신의 상태 정보를 저장한 로컬에서 읽어 들여 상태를 복원한다. 그리고, mongos는 주기적으로 config 서버의 상태를 체크하기 때문에 복원된 서버와의 접속을 수행해 상태를 정상적인 상태로 유지시키게 된다.
 
 ### 마스터 서버 장애
+앞절에서 우리는 config 서버가 데이터 삽입과는 연관이 없는 것을 살펴보았다. 그러면 샤드를 구성하고 있는 __복제 집합 서버인 mongod가 장애가 발생하였다면 어떠한 문제가 있는지 살펴보자.__ [그림 5-10]과 같이 mongos가 우선은 포트 10001 마스터 서버에 데이터를 삽입하고 있는 상태이다. 그리고, 포트 10001 서버가 장애가 발생하여 새로운 마스터 서버를 선출하게 된다. 새로운 마스터 서버는 포트 10003 서버가 선출되었다. Mongos를 통해 새롭게 백만건 데이터를 삽입할 경우에 정확하게 데이터가 삽입되었는지 알아보면 [리스트 5-6]과 같이 정확하게 백만건이 삽입되어 있는 것을 알 수 있다.
+
+![그림 5-10](./images/pic5-10.png "그림 5-10")
+
+[리스트 5-6] 단일 샤드 서버에서 마스터 장애 이후 데이터 삽입
+```
+mongos> db.stats()
+{
+    "raw" : {
+        "firstset/localhost:10001,localhost:10002,localhost:10003" : {
+            "db" : "test",
+            "collections" : 3,
+            "objects" : 5000004,
+            "avgObjSize" : 100.33406133275093,
+            "dataSize" : 501670708,
+            "storageSize" : 607449088,
+            "numExtents" : 22,
+            "indexes" : 1,
+            "indexSize" : 162228192,
+            "fileSize" : 2080374784,
+            "nsSizeMB" : 16,
+            "ok" : 1
+        }
+    },
+    "objects" : 5000004,
+    "avgObjSize" : 100.33406133275093,
+    "dataSize" : 501670708,
+    "storageSize" : 607449088,
+    "numExtents" : 22,
+    "indexes" : 1,
+    "indexSize" : 162228192,
+    "fileSize" : 2080374784,
+    "ok" : 1
+}
+mongos>
+```
+
+[그림 5-10]의 상황에서 새롭게 선출된 마스터 서버 포트 10003 서버가 다시 장애가 발생되어 복제 집합에서 마스터 서버를 선출할 수 없는 상황이 발생되었다. 즉, __마스터 서버가 존재하지 않기 때문에 해당 샤드 서버는 데이터 삽입을 수행할 수 없게 된다.__ 하지만, mongos는 살아있기 때문에 클라이언트는 MongoDB와의 접속이 유지되어 있다. 이와 같을 경우 [리스트 5-7]과 같이 데이터 삽입을 수행하면 `Socket exception` 이라는 에러가 발생한다.
+
+[리스트 5-7] 샤드 서버에서 마스터 서버가 모두 장애가 발생한 경우
+```
+mongos> for(var i=0; i<10; i++){
+... name = people[Math.floor(Math.random()*people.length)];
+...      user_id = i;
+...      boolean = [true, false][Math.floor(Math.random()*2)];
+...      added_at = new Date();
+...      number = Math.floor(Math.random()*10001);
+... r_id":user_id, "boolean": boolean, "added_at":added_at, "number":number });
+... }
+socket exception
+```
+
+[그림 5-12]는 [그림 5-11]의 상태에서 서버를 재기동한 모습이다. 장애가 발생한 서버를 재기동하면, 마지막으로 마스터가 설정된 서버가 다시 마스터가 된다. __Mongos는 마스터 서버가 다시 복원된 것을 판단하고, 데이터 삽입을 마스터 서버로 보내게 된다.__ [리스트 5-8]은 [그림 5-12]로 서버가 복원된 다음에 데이터를 백만건 삽입한 경우에, 결과를 출력한 것이다. 정상적으로 데이터가 백만건이 삽입되었음을 알 수 있다.
+
+![그림 5-11](./images/pic5-11.png "그림 5-11 단일 샤드 서버에서 마스터 서버가 모두 장애가 발생한 경우")
+
+![그림 5-12](./images/pic5-12.png "그림 5-12 단일 샤드 서버에서 장애가 발생한 서버를 복원한 경우")
+
+[리스트 5-8] 마스터 서버 복구 후 데이터 백만건 삽입
+```
+mongos> db.stats()
+{
+    "raw" : {
+        "firstset/localhost:10001,localhost:10002,localhost:10003" : {
+            "db" : "test",
+            "collections" : 3,
+            "objects" : 6000004,
+            "avgObjSize" : 100.33383777744149,
+            "dataSize" : 602003428,
+            "storageSize" : 736788480,
+            "numExtents" : 23,
+            "indexes" : 1,
+            "indexSize" : 194678736,
+            "fileSize" : 2080374784,
+            "nsSizeMB" : 16,
+            "ok" : 1
+        }
+    },
+    "objects" : 6000004,
+    "avgObjSize" : 100.33383777744149,
+    "dataSize" : 602003428,
+    "storageSize" : 736788480,
+    "numExtents" : 23,
+    "indexes" : 1,
+    "indexSize" : 194678736,
+    "fileSize" : 2080374784,
+    "ok" : 1
+}
+mongos>
+```
+
+가장 중요한 테스트로 데이터가 삽입하는 상황에서 __마스터 서버에 장애가 발생하여 새로운 마스터를 선출하는 과정이 발생하였다면, 데이터 삽입이 정확하게 이루어지는지 확인해 보아야 한다.__ [그림 5-13]은 마스터 서버 포트 10003 서버를 데이터 삽입하는 도중에 장애를 발생시킨 상황을 보여준다. 이와 같을 경우에 데이터 삽입이 완료한 후 삽입된 데이터의 개수를 살펴본 결과를 [리스트 5-9]에서 보여준다. 데이터는 십만개를 삽입하였다.
+
+![그림 5-13](./images/pic5-13.png "그림 5-13 데이터 삽입 도중에 마스터 서버 장애 발생")
+
+[리스트 5-9]에서 데이터 100,000건 중에 2,889건에 대해서 오류가 발생하였다. 이는 마스터 선출을 위해 투표하는 도중에 삽입된 데이터를 MongoDB가 오류로 처리한 것이다. 이와 같은 경우는 `getLastError()`를 이용하여 데이터 재 삽입을 수행하여야 한다.
+
+[리스트 5-9] 데이터 삽입 중에 마스터 서버가 장애가 발생한 상태
+```
+mongos> db.stats()
+{
+    "raw" : {
+        "firstset/localhost:10001,localhost:10002,localhost:10003" : {
+            "db" : "test",
+            "collections" : 3,
+            "objects" : 6000004,
+            "avgObjSize" : 100.33383777744149,
+            "dataSize" : 602003428,
+            "storageSize" : 736788480,
+            "numExtents" : 23,
+            "indexes" : 1,
+            "indexSize" : 194678736,
+            "fileSize" : 2080374784,
+            "nsSizeMB" : 16,
+            "ok" : 1
+        }
+    },
+    "objects" : 6000004,
+    "avgObjSize" : 100.33383777744149,
+    "dataSize" : 602003428,
+    "storageSize" : 736788480,
+    "numExtents" : 23,
+    "indexes" : 1,
+    "indexSize" : 194678736,
+    "fileSize" : 2080374784,
+    "ok" : 1
+}
+mongos>
+```
