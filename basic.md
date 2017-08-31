@@ -602,11 +602,11 @@ WriteResult({ "nMatched" : 1, "nUpserted" : 0, "nModified" : 1 })
 
 ### 공간적(Geospatial) 인덱스
 지도의 좌표와 같은 데이터를 효율적으로 쿼리하기 위한 인덱스
-(참고)[https://docs.mongodb.org/manual/core/geospatial-indexes/]
+[참고](https://docs.mongodb.org/manual/core/geospatial-indexes/)
 
 ### 텍스트 인덱스
 텍스트 데이터를 호율적으로 쿼리하기 위한 인덱스
-(참고)[https://docs.mongodb.org/manual/core/index-text/]
+[참고](https://docs.mongodb.org/manual/core/index-text/)
 
 ### 해시 인덱스
 B-Tree 대신 해시 자료구조를 사용한다. 해시의 검색 효율은 B-Tree보다 좋지만, 정렬을 하지 않는다.
